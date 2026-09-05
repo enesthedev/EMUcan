@@ -24,7 +24,7 @@
 #ifndef _EMUcan_h
 #define _EMUcan_h
 
-#define EMUCAN_LIB_VERSION (F("2.0.4"))
+#define EMUCAN_LIB_VERSION (F("2.1.0"))
 
 // Number of user defined CAN stream channels that can be mapped.
 // Raise it from the build if a configuration needs more: -DEMUCAN_USER_CHANNELS=16
