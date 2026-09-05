@@ -34,6 +34,10 @@ bool EMUcan::checkEMUcan(uint32_t can_id, uint8_t can_dlc, uint8_t data[8]) {
     // Store the event:
     _emucanstatusEngine(EMU_MESSAGE_RECEIVED_VALID);
     return true;
+  } else if (_decodeUserFrame(can_id, can_dlc, data)) {
+    // A user defined CAN stream message, it also comes from the EMU:
+    _emucanstatusEngine(EMU_MESSAGE_RECEIVED_VALID);
+    return true;
   } else {
     _emucanstatusEngine(EMU_RECEIVED_NOTHING);
     return false;
@@ -184,4 +188,89 @@ bool EMUcan::decodeCel() {
   } else {
     return false;
   }
+}
+
+uint8_t EMUcan::_userChannelWidth(const USER_CHANNEL_TYPE type) {
+  // Bytes occupied in the frame by a channel of this type:
+  if (type == U8 || type == S8) {
+    return 1;
+  }
+  return 2;
+}
+
+bool EMUcan::addUserChannel(const uint32_t can_id, const uint8_t position, const USER_CHANNEL_TYPE type, float *target,
+                            const uint16_t mult, const uint16_t divider, const int16_t offset) {
+  // Map one channel of a user defined CAN stream onto a float.
+  // Refuse everything that could not be decoded later on:
+  if (target == nullptr || mult == 0 || divider == 0) {
+    return false;
+  }
+  if (position + _userChannelWidth(type) > 8) {
+    return false;
+  }
+  if (_userChannelCount >= EMUCAN_USER_CHANNELS) {
+    return false;
+  }
+  user_channel_t &channel = _userChannels[_userChannelCount];
+  channel.can_id = can_id;
+  channel.target = target;
+  channel.mult = mult;
+  channel.divider = divider;
+  channel.offset = offset;
+  channel.position = position;
+  channel.type = type;
+  _userChannelCount++;
+  // Give the target a defined value until the first frame arrives:
+  *target = 0;
+  return true;
+}
+
+uint8_t EMUcan::userChannelCount() {
+  return _userChannelCount;
+}
+
+bool EMUcan::_decodeUserFrame(uint32_t can_id, uint8_t can_dlc, uint8_t data[8]) {
+  // Decodes every mapped channel carried by this frame, returns true if there was one.
+  // One message can hold several channels, so all of them have to be walked.
+  bool matched = false;
+  for (uint8_t i = 0; i < _userChannelCount; i++) {
+    user_channel_t &channel = _userChannels[i];
+    if (channel.can_id != can_id) {
+      continue;
+    }
+    const USER_CHANNEL_TYPE type = (USER_CHANNEL_TYPE)channel.type;
+    // Do not read past the end of a short frame:
+    if (can_dlc < channel.position + _userChannelWidth(type)) {
+      continue;
+    }
+    const uint8_t *raw_data = &data[channel.position];
+    // Signed types have to be cast before they get scaled:
+    int32_t raw;
+    switch (type) {
+      case U8:
+        raw = raw_data[0];
+        break;
+      case S8:
+        raw = int8_t(raw_data[0]);
+        break;
+      case U16_LE:
+        raw = uint16_t((raw_data[1] << 8) + raw_data[0]);
+        break;
+      case S16_LE:
+        raw = int16_t((raw_data[1] << 8) + raw_data[0]);
+        break;
+      case U16_BE:
+        raw = uint16_t((raw_data[0] << 8) + raw_data[1]);
+        break;
+      case S16_BE:
+        raw = int16_t((raw_data[0] << 8) + raw_data[1]);
+        break;
+      default:
+        continue;
+    }
+    // The scaling as entered in the EMU software:
+    *channel.target = (float)raw * channel.divider / channel.mult + channel.offset;
+    matched = true;
+  }
+  return matched;
 }
