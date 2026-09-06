@@ -24,7 +24,13 @@
 #ifndef _EMUcan_h
 #define _EMUcan_h
 
-#define EMUCAN_LIB_VERSION (F("2.0.4"))
+#define EMUCAN_LIB_VERSION (F("2.1.0"))
+
+// Number of user defined CAN stream channels that can be mapped.
+// Raise it from the build if a configuration needs more: -DEMUCAN_USER_CHANNELS=16
+#ifndef EMUCAN_USER_CHANNELS
+#define EMUCAN_USER_CHANNELS 8
+#endif
 
 // Available data
 struct emu_data_t {
@@ -86,10 +92,28 @@ public:
   // Constructor
   EMUcan(const uint32_t EMUbase = 0x600);
 
+  // Source type of a user defined CAN stream channel, named as in the EMU software:
+  enum USER_CHANNEL_TYPE : uint8_t {
+    U8,      // 8 bits unsigned
+    S8,      // 8 bits signed
+    U16_LE,  // 16 bits unsigned little endian
+    S16_LE,  // 16 bits signed little endian
+    U16_BE,  // 16 bits unsigned big endian
+    S16_BE   // 16 bits signed big endian
+  };
+
   // Methods
   bool checkEMUcan(uint32_t can_id, uint8_t can_dlc, uint8_t data[8]);
   bool decodeCel();
   EMUcan_STATUS EMUcan_Status();
+
+  // Map one channel of a user defined CAN stream onto a float of your own.
+  // position is the byte offset inside the frame (0-7), the scaling is the one
+  // entered in the EMU software: value = raw * divider / mult + offset
+  // Returns false if the table is full or an argument is out of range.
+  bool addUserChannel(const uint32_t can_id, const uint8_t position, const USER_CHANNEL_TYPE type, float *target,
+                      const uint16_t mult = 1, const uint16_t divider = 1, const int16_t offset = 0);
+  uint8_t userChannelCount();
 
   // Data
   struct emu_data_t emu_data;
@@ -180,10 +204,24 @@ private:
     EMU_RECEIVED_NOTHING
   };
 
+  struct user_channel_t {
+    uint32_t can_id;
+    float *target;
+    uint16_t mult;
+    uint16_t divider;
+    int16_t offset;
+    uint8_t position;
+    uint8_t type;
+  };
+
   void _decodeEmuFrame(uint32_t can_id, uint8_t can_dlc, uint8_t data[8]);
+  bool _decodeUserFrame(uint32_t can_id, uint8_t can_dlc, uint8_t data[8]);
   void _emucanstatusEngine(const EMU_STATUS_UPDATES action);
+  static uint8_t _userChannelWidth(const USER_CHANNEL_TYPE type);
 
   uint32_t _EMUbase;
   unsigned long _previousMillis = 0;
+  user_channel_t _userChannels[EMUCAN_USER_CHANNELS];
+  uint8_t _userChannelCount = 0;
 };
 #endif

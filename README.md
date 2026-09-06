@@ -217,6 +217,44 @@ if (emucan.emu_data.cel & emucan.ERR_CLT) {
 }
 ```
 
+### User defined CAN stream
+
+Besides the default stream the EMU can send any of its internal channels in **user defined CAN messages**, configured in the EMU software under "User defined CAN stream". Every message has its own ID, and carries channels described by Type, Pos., Mult, Divider and Offset. The default ID of the first message is the EMU stream base ID plus 0x0F, so 0x60F with the default base.
+
+Such a channel is mapped onto a float of your own with `addUserChannel`, one call per channel:
+
+```C++
+// The decoded values live in your own variables:
+float knockIgnCorrection, oilTemp, boost;
+
+void setup() {
+  // Message 0x60F: Knock ign correction, 16 bits signed little endian, Pos. 0, Mult. 10
+  emucan.addUserChannel(0x60F, 0, EMUcan::S16_LE, &knockIgnCorrection, 10);
+
+  // Any other channel, on any number of message IDs:
+  emucan.addUserChannel(0x610, 0, EMUcan::U8, &oilTemp, 1, 1, -40);
+  emucan.addUserChannel(0x610, 2, EMUcan::U16_LE, &boost);
+}
+```
+
+The frames are handed over with `checkEMUcan` just like the default stream, and the values are read from the variables:
+
+```C++
+Serial.println(knockIgnCorrection);  //deg, negative means the ignition got pulled
+```
+
+The arguments follow the columns of the EMU dialog:
+
+- `can_id` is the message ID.
+- `position` is the **byte** offset inside the frame, 0 to 7.
+- `type` is the source type, one of `EMUcan::U8`, `EMUcan::S8`, `EMUcan::U16_LE`, `EMUcan::S16_LE`, `EMUcan::U16_BE` and `EMUcan::S16_BE`. Signed types keep their sign, 32 bit types are not supported as a float can not hold them exactly.
+- `target` is the float that receives the value. It is set to 0 while it is mapped, and updated with every matching frame.
+- `mult`, `divider` and `offset` are the scaling entered in the EMU, applied as `value = raw * divider / mult + offset`.
+
+Up to `EMUCAN_USER_CHANNELS` channels can be mapped, 8 by default, spread over as many message IDs as wanted. Raise it from the build with `-DEMUCAN_USER_CHANNELS=16` if more are needed. `addUserChannel` returns false if the table is full or an argument is out of range, so it is worth checking.
+
+User defined values are deliberately not part of `emu_data`, that struct mirrors the default stream which looks the same on every EMU.
+
 ### Status
 
 The EMUcan library provides its status:
